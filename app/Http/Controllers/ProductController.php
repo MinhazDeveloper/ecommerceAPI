@@ -30,53 +30,6 @@ class ProductController extends Controller
      * Store a newly created resource in storage.
      */
     // Create Product
-    public function store_OLD(Request $request)
-    {
-        $request->validate([
-            'name'       => 'required',
-            'price'      => 'required|numeric',
-            'category_id'=> 'required|exists:categories,id',
-            'images.*'   => 'image|mimes:jpg,jpeg,png|max:2048'
-        ]);
-
-        // Product object
-        $product = new Product();
-        $product->name        = $request->name;
-        // $product->slug        = Str::slug($request->name);
-        $slug = Str::slug($request->name);
-        $count = Product::where('slug', 'like', "$slug%")->count();
-        $product->slug = $count ? "{$slug}-{$count}" : $slug;
-
-        $product->description = $request->description;
-        $product->price       = $request->price;
-        $product->stock       = $request->stock ?? 0;
-        $product->category_id = $request->category_id;
-        $product->status      = $request->status ?? 1;
-
-        // ডাটাবেজে save করো
-        $product->save();
-
-        // Save images
-        if ($request->hasFile('images')) {
-            foreach ($request->file('images') as $image) {
-                $path = $image->store('products', 'public');
-                $product->images()->create(['image_path' => $path]);
-            }
-        }
-        // Save attribute values
-        if ($request->has('attributes')) {
-            foreach ($request->attributes as $attr) {
-                AttributeValue::create([
-                    'product_id'   => $product->id,
-                    'attribute_id' => $attr['attribute_id'],
-                    'value'        => $attr['value'],
-                ]);
-            }
-        }
-        // return response()->json($product, 201);
-        return response()->json($product->load('attributeValues.attribute'), 201);
-
-    }
     //FOR DB- TRANSACTION
     public function store(Request $request)
     {
@@ -146,32 +99,120 @@ class ProductController extends Controller
     // Update
     public function update(Request $request, $id)
     {
-        $product = Product::findOrFail($id);
+        // 1. Validation
+        $request->validate([
+            'name'          => 'required',
+            'price'         => 'required|numeric',
+            'category_id'   => 'required|exists:categories,id',
+            'images.*'      => 'image|mimes:jpg,jpeg,png|max:2048',
+        ]);
 
-        // $product->update($request->all());
-        $product->update($request->only([
-            'name', 'description', 'price', 'stock', 'category_id', 'status'
-        ]));
+        // 2. Database Transaction
+        $product = DB::transaction(function() use ($request, $id) {
 
-        // Update attributes
-        if ($request->has('attributes')) {
-            // আগের attribute values মুছে দাও
-            $product->attributeValues()->delete();
+            $product = Product::findOrFail($id);
 
-            foreach ($request->attributes as $attr) {
-                AttributeValue::create([
-                    'product_id'   => $product->id,
-                    'attribute_id' => $attr['attribute_id'],
-                    'value'        => $attr['value'],
-                ]);
+            // A. Slug Uniqueness & Generation (Only update if the name has changed)
+            $finalSlug = $product->slug; // Start with the existing slug
+            if ($request->name !== $product->name) {
+                $slug = Str::slug($request->name);
+                // Count products with similar slugs, excluding the current product ID
+                $count = Product::where('slug', 'like', "$slug%")
+                                ->where('id', '!=', $product->id)
+                                ->count();
+                $finalSlug = $count > 0 ? "{$slug}-{$count}" : $slug;
             }
-        }
 
-        // return response()->json($product);
-        return response()->json($product->load('attributeValues.attribute'));
+            // B. Product Update
+            $product->update([
+                'name'          => $request->name,
+                'slug'          => $finalSlug, // Use the potentially new slug
+                'description'   => $request->description,
+                'price'         => $request->price,
+                'stock'         => $request->stock ?? 0,
+                'category_id'   => $request->category_id,
+                'status'        => $request->status ?? 1,
+            ]);
 
+            // C. Handle Images (New uploads)
+            if ($request->hasFile('images')) {
+                foreach ($request->file('images') as $image) {
+                    // Store new image
+                    $path = $image->store('products', 'public');
+                    // Associate with the product
+                    $product->images()->create(['image_path' => $path]);
+                }
+            }
+            
+            // D. Handle Deleted Images (You might need this logic)
+            // This is a common requirement for updates, assuming the request sends
+            // an array of IDs for images to be deleted.
+            /*
+            if ($request->has('deleted_image_ids')) {
+                $product->images()
+                        ->whereIn('id', $request->deleted_image_ids)
+                        ->get() // Get the models to delete files
+                        ->each(function($image) {
+                            // Delete file from storage
+                            Storage::disk('public')->delete($image->image_path); 
+                            // Delete record from database
+                            $image->delete();
+                        });
+            }
+            */
+
+            // E. Handle Attributes (Update/Create)
+            // For an update function, it's often easiest to delete existing
+            // attributes and re-create them, or specifically handle updates
+            // and deletions. Here we'll take the delete-and-recreate approach for simplicity.
+
+            // 1. Delete all existing attribute values for this product
+            $product->attributeValues()->delete(); 
+
+            // 2. Create the new/updated attribute values
+            // if ($request->has('attributes')) {
+            //     $attributeValuesToInsert = [];
+            //     foreach ($request->attributes as $attr) {
+            //         $attributeValuesToInsert[] = [
+            //             'product_id'   => $product->id,
+            //             'attribute_id' => $attr['attribute_id'],
+            //             'value'        => $attr['value'],
+            //             'created_at'   => now(), // Important for mass insertion
+            //             'updated_at'   => now(),
+            //         ];
+            //     }
+            //     // Use insert for efficiency if many attributes
+            //     if (!empty($attributeValuesToInsert)) {
+            //         AttributeValue::insert($attributeValuesToInsert);
+            //     }
+            // }
+            if ($request->has('attributes')) {
+    
+                $attributeValueIds = [];
+                foreach ($request->attributes as $attr) {
+                    // রিকোয়েস্ট থেকে শুধুমাত্র attribute_value_id সংগ্রহ করুন।
+                    // ধরে নিচ্ছি $attr['attribute_value_id'] হলো attribute_values টেবিলের ID.
+                    // **নোট:** আপনার JSON বডিতে 'attribute_id' এর পরিবর্তে 'attribute_value_id' থাকা উচিত।
+                    $attributeValueIds[] = $attr['attribute_value_id']; 
+                }
+
+                // sync() ফাংশনটি: 
+                // 1. পিভট টেবিল attribute_product-এর সব পুরানো এন্ট্রি ডিলিট করে দেবে (যেগুলো $attributeValueIds এ নেই)।
+                // 2. নতুন ID গুলিকে ইনসার্ট করবে।
+                $product->attributeValues()->sync($attributeValueIds);
+
+            } else {
+                // যদি রিকোয়েস্টে কোনো অ্যাট্রিবিউট না থাকে, তাহলে সব পুরানো এন্ট্রি মুছে দিন।
+                $product->attributeValues()->detach();
+            }
+            return $product;
+        });
+
+        // 3. Response
+        // Load the necessary relations and return the updated product with a 200 OK status
+        return response()->json($product->load('attributeValues.attribute'), 200);
+        // return response()->json('Product updated');
     }
-
     /**
      * Remove the specified resource from storage.
      */

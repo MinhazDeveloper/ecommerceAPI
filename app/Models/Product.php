@@ -3,6 +3,9 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany; 
 
 class Product extends Model
 {
@@ -17,9 +20,18 @@ class Product extends Model
     public function variants() {
         return $this->hasMany(ProductVariant::class);
     }
+    // public function attributeValues()
+    // {
+    //     return $this->belongsToMany(AttributeValue::class, 'attribute_product');
+    // }
     public function attributeValues()
     {
-        return $this->belongsToMany(AttributeValue::class, 'attribute_product');
+        return $this->belongsToMany(
+            AttributeValue::class, 
+            'attribute_product', 
+            'product_id', 
+            'attribute_value_id' 
+        );
     }
 
 
