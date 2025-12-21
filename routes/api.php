@@ -42,8 +42,29 @@ Route::middleware('auth:sanctum')->group(function () {
     // -----------------------
     Route::middleware('role:admin')->group(function () {
         Route::get('/admin/dashboard', function () {
-            return response()->json(['message' => 'Admin only content']);
+            return response()->json(['message' => 'Welcome Admin dashboard']);
         });
+    });
+
+    // শুধুমাত্র Vendor এর জন্য
+    Route::middleware('role:vendor')->group(function () {
+        Route::get('/vendor/products',function (){
+            return response()->json(['Welcome Vendor dashboard']);
+        });
+    });
+
+    // Admin এবং Vendor উভয়ের জন্য
+    Route::middleware('role:admin,vendor')->group(function () {
+        Route::get('/reports', function (){
+            return response()->json(['Welcome reports']);
+        });    
+    });
+
+    // Customer এর জন্য
+    Route::middleware('role:customer')->group(function () {
+        Route::get('/my-orders', function (){
+            return response()->json(['Customer orders']);
+        });   
     });
 
     // Resource routes
@@ -58,6 +79,8 @@ Route::middleware('auth:sanctum')->group(function () {
         // DELETE: /api/wishlist/{productId} (Remove from Wishlist)
         Route::delete('/{productId}', [WishlistController::class, 'destroy']); 
     });
+    Route::post('/payment/bkash/initiate', [PaymentController::class, 'initiateBkash']);
+
 });
 
  
