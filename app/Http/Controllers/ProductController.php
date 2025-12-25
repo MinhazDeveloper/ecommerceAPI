@@ -30,7 +30,6 @@ class ProductController extends Controller
      * Store a newly created resource in storage.
      */
     // Create Product
-    //FOR DB- TRANSACTION
     public function store(Request $request)
     {
         $request->validate([
@@ -97,7 +96,7 @@ class ProductController extends Controller
      * Update the specified resource in storage.
      */
     // Update
-    public function update(Request $request, $id)
+    public function update_b4_21_12_25(Request $request, $id)
     {
         // 1. Validation
         $request->validate([
@@ -212,6 +211,67 @@ class ProductController extends Controller
         // Load the necessary relations and return the updated product with a 200 OK status
         return response()->json($product->load('attributeValues.attribute'), 200);
         // return response()->json('Product updated');
+    }
+    public function update(Request $request, $id)
+    {
+        // ১. ভ্যালিডেশন
+        $request->validate([
+            'name'        => 'required|string|max:255',
+            'price'       => 'required|numeric|min:0',
+            'category_id' => 'required|exists:categories,id',
+            'images.*'    => 'image|mimes:jpg,jpeg,png|max:2048',
+        ]);
+
+        try {
+            $product = DB::transaction(function() use ($request, $id) {
+                $product = Product::findOrFail($id);
+
+                // ২. স্লাগ জেনারেশন (নাম পরিবর্তন হলেই কেবল নতুন স্লাগ হবে)
+                $slug = $product->slug;
+                if ($request->name !== $product->name) {
+                    $baseSlug = Str::slug($request->name);
+                    $slug = $baseSlug;
+                    $count = 1;
+                    // স্লাগ ইউনিক কি না চেক করা
+                    while (Product::where('slug', $slug)->where('id', '!=', $id)->exists()) {
+                        $slug = $baseSlug . '-' . $count++;
+                    }
+                }
+
+                // ৩. প্রোডাক্ট আপডেট
+                $product->update([
+                    'name'        => $request->name,
+                    'slug'        => $slug,
+                    'description' => $request->description,
+                    'price'       => $request->price,
+                    'stock'       => $request->stock ?? 0,
+                    'category_id' => $request->category_id,
+                    'status'      => $request->status ?? 1,
+                ]);
+
+                // ৪. নতুন ইমেজ আপলোড
+                if ($request->hasFile('images')) {
+                    foreach ($request->file('images') as $image) {
+                        $path = $image->store('products', 'public');
+                        $product->images()->create(['image_path' => $path]);
+                    }
+                }
+
+                // ৫. অ্যাট্রিবিউট হ্যান্ডলিং (Many-to-Many হলে sync ব্যবহার করুন)
+                if ($request->has('attributes')) {
+                    // $attributeValueIds একটি অ্যারে হতে হবে, উদা: [1, 2, 5]
+                    $attributeValueIds = collect($request->attributes)->pluck('attribute_value_id')->toArray();
+                    $product->attributeValues()->sync($attributeValueIds);
+                }
+
+                return $product;
+            });
+
+            return response()->json($product->load('attributeValues.attribute', 'images'), 200);
+
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Something went wrong!', 'details' => $e->getMessage()], 500);
+        }
     }
     /**
      * Remove the specified resource from storage.

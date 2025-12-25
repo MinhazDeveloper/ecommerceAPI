@@ -11,7 +11,6 @@ class CategoryController extends Controller
     /**
      * Display a listing of the resource.
      */
-    // সব category list দেখাবে
     public function index()
     {
         $categories = Category::with('children', 'parent')->get();
@@ -21,7 +20,6 @@ class CategoryController extends Controller
     /**
      * Store a newly created resource in storage.
      */
-    // নতুন category create করবে
     public function store(Request $request)
     {
         $request->validate([
@@ -44,7 +42,6 @@ class CategoryController extends Controller
     /**
      * Display the specified resource.
      */
-    // নির্দিষ্ট category দেখাবে
     public function show($id)
     {
         $category = Category::with('children', 'parent')->findOrFail($id);
@@ -54,7 +51,6 @@ class CategoryController extends Controller
     /**
      * Update the specified resource in storage.
      */
-    // category update করবে
     public function update(Request $request, $id)
     {
         $request->validate([
@@ -79,7 +75,6 @@ class CategoryController extends Controller
     /**
      * Remove the specified resource from storage.
      */
-    // category delete করবে
     public function destroy($id)
     {
         $category = Category::findOrFail($id);
